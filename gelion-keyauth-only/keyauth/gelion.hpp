@@ -31,6 +31,54 @@ public:
 		}
 		return newString;
 	}
+	int GetInstructionLength(DWORD_PTR address) {
+
+		const int bufferSize = 15;
+		unsigned char buffer[bufferSize];
+
+		if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address), buffer, bufferSize, nullptr)) {
+			return -1;
+		}
+
+		int length = 0;
+		while (length < bufferSize && buffer[length] != 0xC3) {
+			length++;
+		}
+
+		return length;
+	}
+	bool nop_memory(DWORD_PTR address)
+	{
+		DWORD oldProtect;
+
+		size_t size = GetInstructionLength(address);
+
+		if (size <= 0) {
+			MessageBoxA(NULL, "Invalid instruction length", "gelion", MB_ICONERROR | MB_OK);
+			return false;
+		}
+
+		if (VirtualProtect(reinterpret_cast<void*>(address), size, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+			memset(reinterpret_cast<void*>(address), 0x90, size);
+			VirtualProtect(reinterpret_cast<void*>(address), size, oldProtect, &oldProtect);
+			return true;
+		}
+		else {
+			int error = GetLastError();
+			printf("Failed to NOP memory at 0x%lX. Error code: %i", address, error);
+			return false;
+		}
+	}
+
+	void remove_global_check(uintptr_t start_address) {
+		size_t size = GetInstructionLength(start_address);
+		DWORD oldProtect;
+		VirtualProtect(reinterpret_cast<LPVOID>(start_address), size, PAGE_EXECUTE_READWRITE, &oldProtect);
+
+		memset(reinterpret_cast<LPVOID>(start_address), 0x90, size);
+
+		VirtualProtect(reinterpret_cast<LPVOID>(start_address), size, oldProtect, &oldProtect);
+	}
 private:
 
 }; static function_storage* functions = new function_storage();
@@ -93,6 +141,8 @@ public:
 
 
 	std::string login_bypass(std::string data, std::string url) {
+		
+		MessageBoxA(NULL, "hooked requests", "gelion", MB_OK);
 
 		std::string result = functions->keyauth_request_address_original(data, url);
 
@@ -205,15 +255,35 @@ public:
 	std::uintptr_t keyauth_request_address;
 	std::uintptr_t keyauth_error_address;
 	std::uintptr_t keyauth_integrity_check_address;
+	std::uintptr_t keyauth_CMD_error;
+	std::uintptr_t signature_check;
+	std::uintptr_t modify;
 
 	void scan_signatures() {
-		keyauth_request_address = scanner()->find_pattern("48 89 5C 24 20 55 56 57 41 56 41 57 48 8D 6C 24 C9").get();
-		keyauth_error_address = scanner()->find_pattern("48 89 5C 24 10 48 89 74 24 18 57 48 81 EC").get();
+		//keyauth_request_address = scanner()->find_pattern("48 89 5C 24 20 55 56 57 41 56 41 57 48 8D 6C 24 C9").get(); // old keyauth
+		keyauth_request_address = scanner()->find_pattern("48 89 5C 24 20 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C").get(); // newest example
+		keyauth_error_address = scanner()->find_pattern("48 89 5C 24 10 48 89 74 24 18 57 48 81 EC").get(); // can use keyauth_CMD_error instead.
 		keyauth_integrity_check_address = scanner()->find_pattern("48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 81 EC 80 02 00 00").get();
+		modify = scanner()->find_pattern("48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 56").get();
+		keyauth_CMD_error = scanner()->find_pattern("48 89 5C 24 10 57 48 81 EC A0").get();
+		signature_check = scanner()->find_pattern("0F 82 A9 04 00 00 48 8D 85 40 01 00 00").get();
 
-		printf("\nkeyauth request address -> %p", (void*)keyauth_request_address);
-		printf("\nkeyauth error address -> %p", (void*)keyauth_error_address);
-		printf("\nkeyauth integrity address -> %p", (void*)keyauth_integrity_check_address);
+		void* keyauth_request_address_ptr = reinterpret_cast<void*>(keyauth_request_address);
+		void* keyauth_error_address_ptr = reinterpret_cast<void*>(keyauth_error_address);
+		void* keyauth_integrity_check_address_ptr = reinterpret_cast<void*>(keyauth_integrity_check_address);
+
+		// Converting addresses to string format
+		char address_str[20];
+		sprintf(address_str, "%p", keyauth_request_address_ptr);
+		char error_str[20];
+		sprintf(error_str, "%p", keyauth_error_address_ptr);
+		char integrity_str[20];
+		sprintf(integrity_str, "%p", keyauth_integrity_check_address_ptr);
+
+		// Displaying message boxes
+		MessageBoxA(NULL, address_str, "Keyauth Request Address", MB_OK | MB_ICONINFORMATION);
+		MessageBoxA(NULL, error_str, "Keyauth Error Address", MB_OK | MB_ICONINFORMATION);
+		MessageBoxA(NULL, integrity_str, "Keyauth Integrity Address", MB_OK | MB_ICONINFORMATION);
 	}
 
 	static std::string login_bypass_wrapper(std::string data, std::string url) {
@@ -241,6 +311,11 @@ public:
 		}
 
 		MH_Initialize();
+
+		//functions->nop_memory(keyauth_CMD_error);
+	    //functions->remove_global_check(signature_check);
+		//functions->nop_memory(keyauth_integrity_check_address);
+		//functions->nop_memory(modify);
 
 		if (loaded_config["integrity_bypass"]) {
 			if (MH_CreateHook((void**)keyauth_integrity_check_address, &integrity_check_bypass_wrapper, reinterpret_cast<void**>(&functions->keyauth_integrity_check_original)) != MH_OK) {
