@@ -79,6 +79,15 @@ public:
 
 		VirtualProtect(reinterpret_cast<LPVOID>(start_address), size, oldProtect, &oldProtect);
 	}
+
+	void patch_siganture(uintptr_t address) {
+		DWORD oldProtect;
+		VirtualProtect(reinterpret_cast<LPVOID>(address), 1, PAGE_EXECUTE_READWRITE, &oldProtect);
+
+		*reinterpret_cast<BYTE*>(address) = 0x75; 
+
+		VirtualProtect(reinterpret_cast<LPVOID>(address), 1, oldProtect, &oldProtect);
+	}
 private:
 
 }; static function_storage* functions = new function_storage();
@@ -266,7 +275,7 @@ public:
 		keyauth_integrity_check_address = scanner()->find_pattern("48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 81 EC 80 02 00 00").get();
 		modify = scanner()->find_pattern("48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 56").get();
 		keyauth_CMD_error = scanner()->find_pattern("48 89 5C 24 10 57 48 81 EC A0").get();
-		signature_check = scanner()->find_pattern("0F 82 A9 04 00 00 48 8D 85 40 01 00 00").get();
+		signature_check = scanner()->find_pattern("74 ? 48 B8 ? ? ? ? ? ? ? ? 48 8B").get();
 
 		void* keyauth_request_address_ptr = reinterpret_cast<void*>(keyauth_request_address);
 		void* keyauth_error_address_ptr = reinterpret_cast<void*>(keyauth_error_address);
@@ -343,6 +352,8 @@ public:
 		if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
 			MessageBoxW(NULL, L"failed to enable all hooks.", L"Gelion", MB_OK);
 		}
+
+		functions->patch_siganture(signature_check);
 	}
 
 }; static gelion_keyauth* keyauth = new gelion_keyauth();
